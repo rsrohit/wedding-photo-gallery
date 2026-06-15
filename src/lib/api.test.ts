@@ -46,6 +46,47 @@ describe('API mutations', () => {
     ).rejects.toEqual(new ApiError('Photo is too large.', 413));
   });
 
+  it('sends original name and metadata when uploading a processed photo', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          photo: {
+            id: 'photo-1',
+            eventSlug: 'wedding',
+            imageUrl: 'https://api.example/file',
+            downloadUrl: 'https://api.example/file?download=1',
+            originalName: 'Ceremony.HEIC',
+            storedName: 'asha-20260615T083010000Z-photo-1.jpg',
+            uploaderName: 'Asha',
+            sizeBytes: 1024,
+            contentType: 'image/jpeg',
+            createdAt: '2026-06-15T08:30:10.000Z',
+            metadata: {
+              cameraMake: 'Canon'
+            }
+          }
+        })
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await uploadPhoto({
+      apiBaseUrl: 'https://api.example',
+      eventSlug: 'wedding',
+      file: new File(['x'], 'compressed.jpg', { type: 'image/jpeg' }),
+      uploaderName: 'Asha',
+      originalName: 'Ceremony.HEIC',
+      originalSizeBytes: 4_500_000,
+      metadata: { cameraMake: 'Canon' }
+    });
+
+    const formData = fetchMock.mock.calls[0][1].body as FormData;
+    expect(formData.get('uploaderName')).toBe('Asha');
+    expect(formData.get('originalName')).toBe('Ceremony.HEIC');
+    expect(formData.get('originalSizeBytes')).toBe('4500000');
+    expect(formData.get('photoMetadata')).toBe(JSON.stringify({ cameraMake: 'Canon' }));
+  });
+
   it('sends admin token when hiding a photo', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

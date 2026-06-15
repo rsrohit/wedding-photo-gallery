@@ -1,5 +1,15 @@
-import { MAX_PHOTO_SIZE_BYTES, SUPPORTED_PHOTO_TYPES } from '../../src/shared/photoValidation';
+import {
+  MAX_STORED_PHOTO_SIZE_BYTES,
+  SUPPORTED_PHOTO_TYPES,
+  validateUploaderName
+} from '../../src/shared/photoValidation';
 import { errorResponse, jsonResponse, parseEventPhotoPath, withCorsHeaders } from './http';
+import {
+  buildPhotoMetadata,
+  createPhotoObjectKey,
+  getStoredNameFromKey,
+  parsePhotoMetadataPayload
+} from './photoStorage';
 
 type Env = {
   PHOTOS_BUCKET: R2Bucket;
@@ -16,8 +26,15 @@ type PhotoRow = {
   original_name: string;
   content_type: string;
   size_bytes: number;
+  original_size_bytes: number | null;
   uploader_name: string;
   created_at: string;
+  stored_name: string | null;
+  camera_make: string | null;
+  camera_model: string | null;
+  captured_at: string | null;
+  latitude: number | null;
+  longitude: number | null;
 };
 
 const DEFAULT_EVENT_TITLE = 'Wedding Photo Gallery';
@@ -89,7 +106,9 @@ async function listPhotos(
   }
 
   const { results } = await env.WEDDING_DB.prepare(
-    `SELECT id, event_slug, r2_key, original_name, content_type, size_bytes, uploader_name, created_at
+    `SELECT id, event_slug, r2_key, original_name, stored_name, content_type, size_bytes,
+            original_size_bytes, uploader_name, created_at, camera_make, camera_model,
+            captured_at, latitude, longitude
      FROM photos
      WHERE event_slug = ? AND status = 'approved'
      ORDER BY created_at DESC`
@@ -121,35 +140,52 @@ async function uploadPhoto(
 
   const formData = await request.formData();
   const file = formData.get('photo');
-  const uploaderName = normalizeUploaderName(String(formData.get('uploaderName') || 'Guest'));
+  const uploaderNameResult = validateUploaderName(String(formData.get('uploaderName') || ''));
 
   if (!(file instanceof File)) {
     return errorResponse('Choose a photo to upload.', 400, origin, allowedOrigins);
+  }
+
+  if (!uploaderNameResult.ok) {
+    return errorResponse(uploaderNameResult.message, 400, origin, allowedOrigins);
   }
 
   if (!SUPPORTED_PHOTO_TYPES.has(file.type)) {
     return errorResponse('Upload a JPEG, PNG, WebP, HEIC, or AVIF image.', 415, origin, allowedOrigins);
   }
 
-  if (file.size > MAX_PHOTO_SIZE_BYTES) {
-    return errorResponse('Photos must be 15 MB or smaller.', 413, origin, allowedOrigins);
+  if (file.size >= MAX_STORED_PHOTO_SIZE_BYTES) {
+    return errorResponse('Compressed photos must be smaller than 2 MB.', 413, origin, allowedOrigins);
   }
 
   const photoId = crypto.randomUUID();
-  const safeName = sanitizeFileName(file.name || 'photo');
-  const r2Key = `${eventSlug}/${photoId}-${safeName}`;
+  const uploaderName = uploaderNameResult.value;
+  const originalName = sanitizeFileName(String(formData.get('originalName') || file.name || 'photo.jpg'));
+  const metadata = parsePhotoMetadataPayload(formData.get('photoMetadata'));
+  const originalSizeBytes = parsePositiveInteger(String(formData.get('originalSizeBytes') || ''));
   const createdAt = new Date().toISOString();
+  const r2Key = createPhotoObjectKey({
+    eventSlug,
+    uploaderName,
+    uploadedAt: createdAt,
+    photoId,
+    originalName,
+    contentType: file.type
+  });
+  const storedName = getStoredNameFromKey(r2Key);
 
   await env.PHOTOS_BUCKET.put(r2Key, file.stream(), {
     httpMetadata: {
       contentType: file.type
     },
-    customMetadata: {
+    customMetadata: buildPhotoMetadata({
       eventSlug,
       photoId,
       uploaderName,
-      originalName: safeName
-    }
+      originalName,
+      storedName,
+      metadata
+    })
   });
 
   await env.WEDDING_DB.prepare(
@@ -162,10 +198,28 @@ async function uploadPhoto(
 
   await env.WEDDING_DB.prepare(
     `INSERT INTO photos
-      (id, event_slug, r2_key, original_name, content_type, size_bytes, uploader_name, status, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'approved', ?)`
+      (id, event_slug, r2_key, original_name, stored_name, content_type, size_bytes,
+       original_size_bytes, uploader_name, status, created_at, camera_make, camera_model,
+       captured_at, latitude, longitude)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'approved', ?, ?, ?, ?, ?, ?)`
   )
-    .bind(photoId, eventSlug, r2Key, safeName, file.type, file.size, uploaderName, createdAt)
+    .bind(
+      photoId,
+      eventSlug,
+      r2Key,
+      originalName,
+      storedName,
+      file.type,
+      file.size,
+      originalSizeBytes,
+      uploaderName,
+      createdAt,
+      metadata.cameraMake || null,
+      metadata.cameraModel || null,
+      metadata.capturedAt || null,
+      metadata.latitude ?? null,
+      metadata.longitude ?? null
+    )
     .run();
 
   return jsonResponse(
@@ -174,11 +228,18 @@ async function uploadPhoto(
         id: photoId,
         event_slug: eventSlug,
         r2_key: r2Key,
-        original_name: safeName,
+        original_name: originalName,
+        stored_name: storedName,
         content_type: file.type,
         size_bytes: file.size,
+        original_size_bytes: originalSizeBytes,
         uploader_name: uploaderName,
-        created_at: createdAt
+        created_at: createdAt,
+        camera_make: metadata.cameraMake || null,
+        camera_model: metadata.cameraModel || null,
+        captured_at: metadata.capturedAt || null,
+        latitude: metadata.latitude ?? null,
+        longitude: metadata.longitude ?? null
       })
     },
     201,
@@ -196,7 +257,9 @@ async function servePhotoFile(
   allowedOrigins: string[]
 ): Promise<Response> {
   const row = await env.WEDDING_DB.prepare(
-    `SELECT id, event_slug, r2_key, original_name, content_type, size_bytes, uploader_name, created_at
+    `SELECT id, event_slug, r2_key, original_name, stored_name, content_type, size_bytes,
+            original_size_bytes, uploader_name, created_at, camera_make, camera_model,
+            captured_at, latitude, longitude
      FROM photos
      WHERE event_slug = ? AND id = ? AND status = 'approved'`
   )
@@ -295,10 +358,19 @@ function toPhotoDto(request: Request, row: PhotoRow) {
     imageUrl: `${baseUrl}${filePath}`,
     downloadUrl: `${baseUrl}${filePath}?download=1`,
     originalName: row.original_name,
+    storedName: row.stored_name || getStoredNameFromKey(row.r2_key),
     uploaderName: row.uploader_name,
     sizeBytes: row.size_bytes,
+    originalSizeBytes: row.original_size_bytes,
     contentType: row.content_type,
-    createdAt: row.created_at
+    createdAt: row.created_at,
+    metadata: {
+      ...(row.camera_make ? { cameraMake: row.camera_make } : {}),
+      ...(row.camera_model ? { cameraModel: row.camera_model } : {}),
+      ...(row.captured_at ? { capturedAt: row.captured_at } : {}),
+      ...(row.latitude !== null ? { latitude: row.latitude } : {}),
+      ...(row.longitude !== null ? { longitude: row.longitude } : {})
+    }
   };
 }
 
@@ -328,15 +400,6 @@ function sanitizeFileName(fileName: string): string {
   return cleaned || 'photo.jpg';
 }
 
-function normalizeUploaderName(name: string): string {
-  const normalized = name.trim().replace(/\s+/g, ' ');
-  if (!normalized) {
-    return 'Guest';
-  }
-
-  return normalized.length > 35 ? `${normalized.slice(0, 32).trimEnd()}...` : normalized;
-}
-
 function requireAdmin(request: Request, env: Env): { message: string; status: number } | null {
   if (!env.ADMIN_TOKEN) {
     return { message: 'Admin actions are not configured.', status: 503 };
@@ -347,4 +410,9 @@ function requireAdmin(request: Request, env: Env): { message: string; status: nu
   }
 
   return null;
+}
+
+function parsePositiveInteger(value: string): number | null {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }

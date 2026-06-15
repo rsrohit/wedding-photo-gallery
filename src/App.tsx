@@ -4,13 +4,15 @@ import {
   Eye,
   EyeOff,
   ImagePlus,
+  Info,
   Loader2,
   Orbit,
   RefreshCw,
   Shield,
   Sparkles,
   Trash2,
-  Upload
+  Upload,
+  X
 } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { appConfig } from './config';
@@ -22,10 +24,14 @@ import {
   hidePhoto,
   uploadPhoto
 } from './lib/api';
+import { preparePhotoForUpload } from './lib/photoProcessing';
 import { GalleryView, GALLERY_VIEWS, getGalleryViewLabel } from './shared/galleryView';
+import { buildPhotoDetailRows } from './shared/photoDetails';
 import {
+  MAX_STORED_PHOTO_SIZE_BYTES,
   MAX_PHOTO_SIZE_BYTES,
   normalizeUploaderName,
+  validateUploaderName,
   validatePhotoFile
 } from './shared/photoValidation';
 
@@ -44,8 +50,14 @@ export function App() {
   const [adminToken, setAdminToken] = useState('');
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [galleryView, setGalleryView] = useState<GalleryView>('grid');
+  const [infoPhoto, setInfoPhoto] = useState<Photo | null>(null);
 
-  const canUpload = Boolean(apiBaseUrl) && selectedFiles.length > 0 && uploadState !== 'uploading';
+  const normalizedUploaderName = normalizeUploaderName(uploaderName);
+  const canUpload =
+    Boolean(apiBaseUrl) &&
+    selectedFiles.length > 0 &&
+    normalizedUploaderName.length > 0 &&
+    uploadState !== 'uploading';
   const totalSize = useMemo(
     () => selectedFiles.reduce((total, file) => total + file.size, 0),
     [selectedFiles]
@@ -85,6 +97,13 @@ export function App() {
       return;
     }
 
+    const uploaderNameResult = validateUploaderName(uploaderName);
+    if (!uploaderNameResult.ok) {
+      setMessage(uploaderNameResult.message);
+      setUploadState('error');
+      return;
+    }
+
     for (const file of selectedFiles) {
       const validation = validatePhotoFile(file);
       if (!validation.ok) {
@@ -98,14 +117,20 @@ export function App() {
 
     try {
       const uploadedPhotos: Photo[] = [];
-      const displayName = normalizeUploaderName(uploaderName);
+      const displayName = uploaderNameResult.value;
 
-      for (const file of selectedFiles) {
+      for (const [index, file] of selectedFiles.entries()) {
+        setMessage(`Optimizing ${index + 1} of ${selectedFiles.length}...`);
+        const preparedPhoto = await preparePhotoForUpload(file);
+        setMessage(`Uploading ${index + 1} of ${selectedFiles.length}...`);
         const photo = await uploadPhoto({
           apiBaseUrl,
           eventSlug,
-          file,
-          uploaderName: displayName
+          file: preparedPhoto.file,
+          uploaderName: displayName,
+          originalName: preparedPhoto.originalName,
+          originalSizeBytes: preparedPhoto.originalSizeBytes,
+          metadata: preparedPhoto.metadata
         });
         uploadedPhotos.push(photo);
       }
@@ -150,6 +175,9 @@ export function App() {
       setPhotos((current) => current.filter((item) => item.id !== photo.id));
       if (selectedPhoto?.id === photo.id) {
         setSelectedPhoto(null);
+      }
+      if (infoPhoto?.id === photo.id) {
+        setInfoPhoto(null);
       }
       setMessage('Photo deleted.');
     } catch (error) {
@@ -209,15 +237,19 @@ export function App() {
             </div>
 
             <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.16em] text-white/54" htmlFor="uploaderName">
-              Name
+              Name <span className="text-rose-100">*</span>
             </label>
             <input
               id="uploaderName"
               value={uploaderName}
               onChange={(event) => setUploaderName(event.target.value)}
-              placeholder="Guest"
+              placeholder="Your name"
+              required
               className="mt-2 h-11 w-full rounded-md border border-white/12 bg-black/24 px-3 text-sm text-white outline-none transition placeholder:text-white/32 focus:border-teal-200/70 focus:ring-2 focus:ring-teal-200/20"
             />
+            {selectedFiles.length > 0 && !normalizedUploaderName && (
+              <p className="mt-2 text-xs text-rose-100">Name is required before upload.</p>
+            )}
 
             <label htmlFor="photos" className="upload-dropzone mt-4">
               <span className="flex h-11 w-11 items-center justify-center rounded-md border border-teal-200/30 bg-teal-200/12">
@@ -225,7 +257,10 @@ export function App() {
               </span>
               <span className="mt-3 text-sm font-semibold text-white">Select images</span>
               <span className="mt-1 text-xs text-white/52">
-                JPEG, PNG, WebP, HEIC, AVIF · {formatBytes(MAX_PHOTO_SIZE_BYTES)} each
+                JPEG, PNG, WebP, HEIC, AVIF · {formatBytes(MAX_PHOTO_SIZE_BYTES)} original
+              </span>
+              <span className="mt-1 text-xs text-teal-100/72">
+                Optimized below {formatBytes(MAX_STORED_PHOTO_SIZE_BYTES)} before upload
               </span>
             </label>
             <input
@@ -239,7 +274,7 @@ export function App() {
 
             {selectedFiles.length > 0 && (
               <div className="mt-3 rounded-md border border-white/10 bg-white/8 px-3 py-2 text-xs text-white/68">
-                {selectedFiles.length} selected · {formatBytes(totalSize)}
+                {selectedFiles.length} selected · {formatBytes(totalSize)} original
               </div>
             )}
 
@@ -249,7 +284,7 @@ export function App() {
               ) : (
                 <Upload className="h-4 w-4" aria-hidden="true" />
               )}
-              Upload
+              {uploadState === 'uploading' ? 'Optimizing' : 'Upload'}
             </button>
           </form>
 
@@ -331,6 +366,7 @@ export function App() {
               photos={photos}
               isAdminOpen={isAdminOpen}
               onOpen={setSelectedPhoto}
+              onShowInfo={setInfoPhoto}
               onHide={handleHide}
               onDelete={handleDelete}
             />
@@ -339,6 +375,7 @@ export function App() {
               photos={photos}
               isAdminOpen={isAdminOpen}
               onOpen={setSelectedPhoto}
+              onShowInfo={setInfoPhoto}
               onHide={handleHide}
               onDelete={handleDelete}
             />
@@ -363,14 +400,26 @@ export function App() {
               <span>
                 Uploaded by <strong>{selectedPhoto.uploaderName}</strong>
               </span>
-              <a href={selectedPhoto.downloadUrl} className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-white px-4 font-semibold text-black">
-                <Download className="h-4 w-4" aria-hidden="true" />
-                Download
-              </a>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setInfoPhoto(selectedPhoto)}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-white/16 bg-white/10 px-4 font-semibold text-white hover:bg-white/16"
+                >
+                  <Info className="h-4 w-4" aria-hidden="true" />
+                  Info
+                </button>
+                <a href={selectedPhoto.downloadUrl} className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-white px-4 font-semibold text-black">
+                  <Download className="h-4 w-4" aria-hidden="true" />
+                  Download
+                </a>
+              </div>
             </div>
           </div>
         </div>
       )}
+
+      {infoPhoto && <PhotoDetailsDialog photo={infoPhoto} onClose={() => setInfoPhoto(null)} />}
     </main>
   );
 }
@@ -379,11 +428,12 @@ type PhotoViewProps = {
   photos: Photo[];
   isAdminOpen: boolean;
   onOpen: (photo: Photo) => void;
+  onShowInfo: (photo: Photo) => void;
   onHide: (photo: Photo) => void;
   onDelete: (photo: Photo) => void;
 };
 
-function GridView({ photos, isAdminOpen, onOpen, onHide, onDelete }: PhotoViewProps) {
+function GridView({ photos, isAdminOpen, onOpen, onShowInfo, onHide, onDelete }: PhotoViewProps) {
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
       {photos.map((photo, index) => (
@@ -393,6 +443,7 @@ function GridView({ photos, isAdminOpen, onOpen, onHide, onDelete }: PhotoViewPr
           index={index}
           isAdminOpen={isAdminOpen}
           onOpen={onOpen}
+          onShowInfo={onShowInfo}
           onHide={onHide}
           onDelete={onDelete}
         />
@@ -463,7 +514,7 @@ type PhotoCardProps = Omit<PhotoViewProps, 'photos'> & {
   index: number;
 };
 
-function PhotoCard({ photo, index, isAdminOpen, onOpen, onHide, onDelete }: PhotoCardProps) {
+function PhotoCard({ photo, index, isAdminOpen, onOpen, onShowInfo, onHide, onDelete }: PhotoCardProps) {
   return (
     <article className="memory-card group" style={{ animationDelay: `${Math.min(index * 45, 450)}ms` }}>
       <button
@@ -485,6 +536,15 @@ function PhotoCard({ photo, index, isAdminOpen, onOpen, onHide, onDelete }: Phot
           <p className="text-xs text-white/48">{formatDate(photo.createdAt)}</p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onShowInfo(photo)}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/12 bg-white/8 text-white/72 hover:bg-white/14"
+            aria-label="Show photo details"
+            title="Show photo details"
+          >
+            <Info className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
           <a href={photo.downloadUrl} className="inline-flex h-8 flex-1 items-center justify-center gap-1 rounded-md border border-white/12 bg-white/8 text-xs font-semibold text-white hover:bg-white/14">
             <Download className="h-3.5 w-3.5" aria-hidden="true" />
             Download
@@ -495,6 +555,45 @@ function PhotoCard({ photo, index, isAdminOpen, onOpen, onHide, onDelete }: Phot
         </div>
       </div>
     </article>
+  );
+}
+
+function PhotoDetailsDialog({ photo, onClose }: { photo: Photo; onClose: () => void }) {
+  const detailRows = buildPhotoDetailRows(photo);
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/72 p-4 backdrop-blur-xl"
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+    >
+      <section className="glass-panel max-h-full w-full max-w-lg overflow-auto p-5" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-teal-100/80">
+              <Info className="h-3.5 w-3.5" aria-hidden="true" />
+              Photo info
+            </div>
+            <h3 className="mt-2 text-xl font-semibold text-white">{photo.uploaderName}</h3>
+          </div>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Close photo details">
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
+
+        <dl className="mt-5 divide-y divide-white/10 rounded-lg border border-white/10 bg-black/20">
+          {detailRows.map((row) => (
+            <div key={row.label} className="grid gap-1 px-3 py-3 sm:grid-cols-[130px_minmax(0,1fr)]">
+              <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-white/42">
+                {row.label}
+              </dt>
+              <dd className="break-words text-sm text-white/84">{row.value}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+    </div>
   );
 }
 

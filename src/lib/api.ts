@@ -1,13 +1,18 @@
+import { PhotoMetadata } from '../shared/photoMetadata';
+
 export type Photo = {
   id: string;
   eventSlug: string;
   imageUrl: string;
   downloadUrl: string;
   originalName: string;
+  storedName: string;
   uploaderName: string;
   sizeBytes: number;
+  originalSizeBytes: number | null;
   contentType: string;
   createdAt: string;
+  metadata: PhotoMetadata;
 };
 
 type ApiOptions = {
@@ -67,11 +72,19 @@ export async function uploadPhoto(
   options: ApiOptions & {
     file: File;
     uploaderName: string;
+    originalName?: string;
+    originalSizeBytes?: number;
+    metadata?: PhotoMetadata;
   }
 ): Promise<Photo> {
   const formData = new FormData();
   formData.set('photo', options.file);
   formData.set('uploaderName', options.uploaderName);
+  formData.set('originalName', options.originalName || options.file.name);
+  if (options.originalSizeBytes) {
+    formData.set('originalSizeBytes', String(options.originalSizeBytes));
+  }
+  formData.set('photoMetadata', JSON.stringify(options.metadata || {}));
 
   const response = await fetch(
     buildApiUrl(options.apiBaseUrl, `/api/events/${encodeURIComponent(options.eventSlug)}/photos`),
