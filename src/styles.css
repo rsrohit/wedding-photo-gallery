@@ -236,6 +236,29 @@ img {
   scroll-snap-align: start;
 }
 
+.all-photos-dialog {
+  display: flex;
+  width: min(72rem, 100%);
+  max-height: min(86vh, 58rem);
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.055)),
+    rgba(0, 0, 0, 0.72);
+  box-shadow: 0 30px 100px rgba(0, 0, 0, 0.58);
+  backdrop-filter: blur(24px);
+}
+
+.all-photos-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11.5rem, 1fr));
+  gap: 0.75rem;
+  overflow: auto;
+  padding: 1rem;
+}
+
 .memory-card {
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.11);

@@ -15,14 +15,19 @@ export function getRecentlyUploadedPhotos<T extends PhotoCollectionItem>(
     .slice(0, limit);
 }
 
-export function getMostViewedPhotos<T extends PhotoCollectionItem>(photos: T[]): T[] {
-  return [...photos].sort((left, right) => {
-    if (right.viewCount !== left.viewCount) {
-      return right.viewCount - left.viewCount;
-    }
+export function getMostViewedPhotos<T extends PhotoCollectionItem>(
+  photos: T[],
+  limit = photos.length
+): T[] {
+  return [...photos]
+    .sort((left, right) => {
+      if (right.viewCount !== left.viewCount) {
+        return right.viewCount - left.viewCount;
+      }
 
-    return compareNewestFirst(left.createdAt, right.createdAt);
-  });
+      return compareNewestFirst(left.createdAt, right.createdAt);
+    })
+    .slice(0, limit);
 }
 
 export function getAdjacentPhoto<T extends { id: string }>(

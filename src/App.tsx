@@ -44,6 +44,7 @@ import {
 } from './shared/photoValidation';
 
 const { apiBaseUrl, eventSlug, eventTitle } = appConfig;
+const CAROUSEL_PHOTO_LIMIT = 10;
 
 type UploadState = 'idle' | 'uploading' | 'done' | 'error';
 
@@ -58,6 +59,7 @@ export function App() {
   const [adminToken, setAdminToken] = useState('');
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [infoPhoto, setInfoPhoto] = useState<Photo | null>(null);
+  const [isAllPhotosOpen, setIsAllPhotosOpen] = useState(false);
 
   const normalizedUploaderName = normalizeUploaderName(uploaderName);
   const canUpload =
@@ -69,10 +71,17 @@ export function App() {
     () => selectedFiles.reduce((total, file) => total + file.size, 0),
     [selectedFiles]
   );
-  const recentPhotos = useMemo(() => getRecentlyUploadedPhotos(photos), [photos]);
-  const mostViewedPhotos = useMemo(() => getMostViewedPhotos(photos), [photos]);
-  const latestPhoto = recentPhotos[0];
-  const canNavigateLightbox = recentPhotos.length > 1;
+  const allPhotos = useMemo(() => getRecentlyUploadedPhotos(photos), [photos]);
+  const recentPhotos = useMemo(
+    () => getRecentlyUploadedPhotos(photos, CAROUSEL_PHOTO_LIMIT),
+    [photos]
+  );
+  const mostViewedPhotos = useMemo(
+    () => getMostViewedPhotos(photos, CAROUSEL_PHOTO_LIMIT),
+    [photos]
+  );
+  const latestPhoto = allPhotos[0];
+  const canNavigateLightbox = allPhotos.length > 1;
 
   const recordView = useCallback(async (photo: Photo) => {
     if (!apiBaseUrl) {
@@ -116,12 +125,12 @@ export function App() {
         return;
       }
 
-      const adjacentPhoto = getAdjacentPhoto(recentPhotos, selectedPhoto.id, direction);
+      const adjacentPhoto = getAdjacentPhoto(allPhotos, selectedPhoto.id, direction);
       if (adjacentPhoto) {
         openPhoto(adjacentPhoto);
       }
     },
-    [openPhoto, recentPhotos, selectedPhoto]
+    [allPhotos, openPhoto, selectedPhoto]
   );
 
   useEffect(() => {
@@ -158,6 +167,21 @@ export function App() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [openAdjacentPhoto, selectedPhoto]);
+
+  useEffect(() => {
+    if (!isAllPhotosOpen) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setIsAllPhotosOpen(false);
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isAllPhotosOpen]);
 
   async function loadPhotos() {
     setIsLoading(true);
@@ -434,8 +458,20 @@ export function App() {
               </div>
               <h2 className="mt-2 text-2xl font-semibold tracking-normal text-white">Shared moments</h2>
             </div>
-            <div className="rounded-lg border border-white/10 bg-white/8 px-3 py-2 text-sm font-semibold text-white/72">
-              {photos.length} {photos.length === 1 ? 'photo' : 'photos'}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="rounded-lg border border-white/10 bg-white/8 px-3 py-2 text-sm font-semibold text-white/72">
+                {photos.length} {photos.length === 1 ? 'photo' : 'photos'}
+              </div>
+              {photos.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setIsAllPhotosOpen(true)}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-teal-200/30 bg-teal-200/12 px-4 text-sm font-semibold text-teal-50 hover:bg-teal-200/20"
+                >
+                  <ImagePlus className="h-4 w-4" aria-hidden="true" />
+                  View all photos
+                </button>
+              )}
             </div>
           </div>
 
@@ -448,7 +484,6 @@ export function App() {
               heroPhoto={latestPhoto}
               recentPhotos={recentPhotos}
               mostViewedPhotos={mostViewedPhotos}
-              allPhotos={recentPhotos}
               isAdminOpen={isAdminOpen}
               onOpen={openPhoto}
               onShowInfo={setInfoPhoto}
@@ -529,6 +564,17 @@ export function App() {
       )}
 
       {infoPhoto && <PhotoDetailsDialog photo={infoPhoto} onClose={() => setInfoPhoto(null)} />}
+      {isAllPhotosOpen && (
+        <AllPhotosDialog
+          photos={allPhotos}
+          isAdminOpen={isAdminOpen}
+          onOpen={openPhoto}
+          onShowInfo={setInfoPhoto}
+          onHide={handleHide}
+          onDelete={handleDelete}
+          onClose={() => setIsAllPhotosOpen(false)}
+        />
+      )}
     </main>
   );
 }
@@ -545,14 +591,12 @@ type CarouselShowcaseProps = PhotoCollectionProps & {
   heroPhoto: Photo;
   recentPhotos: Photo[];
   mostViewedPhotos: Photo[];
-  allPhotos: Photo[];
 };
 
 function CarouselShowcase({
   heroPhoto,
   recentPhotos,
   mostViewedPhotos,
-  allPhotos,
   isAdminOpen,
   onOpen,
   onShowInfo,
@@ -581,15 +625,6 @@ function CarouselShowcase({
       <PhotoCarousel
         title="Most Viewed"
         photos={mostViewedPhotos}
-        isAdminOpen={isAdminOpen}
-        onOpen={onOpen}
-        onShowInfo={onShowInfo}
-        onHide={onHide}
-        onDelete={onDelete}
-      />
-      <PhotoCarousel
-        title="All Photos"
-        photos={allPhotos}
         isAdminOpen={isAdminOpen}
         onOpen={onOpen}
         onShowInfo={onShowInfo}
@@ -676,11 +711,8 @@ function PhotoCarousel({
 }: PhotoCollectionProps & { title: string; photos: Photo[] }) {
   return (
     <section className="carousel-rail">
-      <div className="mb-3 flex items-center justify-between gap-3 px-1">
+      <div className="mb-3 px-1">
         <h3 className="text-lg font-semibold text-white">{title}</h3>
-        <span className="rounded-md border border-white/10 bg-white/8 px-2 py-1 text-xs font-semibold text-white/56">
-          {photos.length}
-        </span>
       </div>
       <div className="carousel-track" aria-label={`${title} carousel`}>
         {photos.map((photo, index) => (
@@ -698,6 +730,57 @@ function PhotoCarousel({
         ))}
       </div>
     </section>
+  );
+}
+
+function AllPhotosDialog({
+  photos,
+  isAdminOpen,
+  onOpen,
+  onShowInfo,
+  onHide,
+  onDelete,
+  onClose
+}: PhotoCollectionProps & { photos: Photo[]; onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-[55] flex items-center justify-center bg-black/82 p-4 backdrop-blur-xl"
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+    >
+      <section className="all-photos-dialog" onClick={(event) => event.stopPropagation()}>
+        <div className="flex flex-col gap-3 border-b border-white/10 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-teal-100/80">
+              <ImagePlus className="h-3.5 w-3.5" aria-hidden="true" />
+              Gallery
+            </div>
+            <h3 className="mt-2 text-2xl font-semibold text-white">All photos</h3>
+          </div>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Close all photos">
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
+        <div className="all-photos-grid">
+          {photos.map((photo, index) => (
+            <PhotoCard
+              key={`all-${photo.id}`}
+              photo={photo}
+              index={index}
+              isAdminOpen={isAdminOpen}
+              onOpen={(selectedPhoto) => {
+                onOpen(selectedPhoto);
+                onClose();
+              }}
+              onShowInfo={onShowInfo}
+              onHide={onHide}
+              onDelete={onDelete}
+            />
+          ))}
+        </div>
+      </section>
+    </div>
   );
 }
 

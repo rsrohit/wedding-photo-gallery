@@ -36,6 +36,13 @@ describe('getMostViewedPhotos', () => {
       'quiet'
     ]);
   });
+
+  it('respects a result limit', () => {
+    expect(getMostViewedPhotos(photos, 2).map((photo) => photo.id)).toEqual([
+      'middle-popular',
+      'old-popular'
+    ]);
+  });
 });
 
 describe('getAdjacentPhoto', () => {
