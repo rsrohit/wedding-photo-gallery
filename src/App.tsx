@@ -11,6 +11,7 @@ import {
   Upload
 } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { appConfig } from './config';
 import {
   ApiError,
   Photo,
@@ -25,9 +26,7 @@ import {
   validatePhotoFile
 } from './shared/photoValidation';
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '';
-const eventSlug = import.meta.env.VITE_EVENT_SLUG || 'wedding';
-const eventTitle = import.meta.env.VITE_EVENT_TITLE || 'Wedding Photo Gallery';
+const { apiBaseUrl, eventSlug, eventTitle } = appConfig;
 
 type UploadState = 'idle' | 'uploading' | 'done' | 'error';
 

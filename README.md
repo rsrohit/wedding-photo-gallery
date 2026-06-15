@@ -27,7 +27,13 @@ npm test
 npm run dev
 ```
 
-Create a `.env.local` file for frontend development:
+The app defaults to the deployed Worker API:
+
+```text
+https://wedding-photo-gallery-api.rsrohit.workers.dev
+```
+
+Create a `.env.local` file only if you want to override the defaults for local development:
 
 ```bash
 VITE_API_BASE_URL=http://localhost:8787
@@ -74,7 +80,7 @@ https://wedding-photo-gallery-api.<your-subdomain>.workers.dev
 
 ## GitHub Pages Setup
 
-In the GitHub repo, go to **Settings -> Secrets and variables -> Actions -> Variables** and add:
+The app already has production defaults for this deployment. If you want to override them, go to **Settings -> Secrets and variables -> Actions -> Variables** and add:
 
 - `VITE_API_BASE_URL`: your Worker URL
 - `VITE_EVENT_SLUG`: `wedding`
