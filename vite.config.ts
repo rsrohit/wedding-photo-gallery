@@ -1,5 +1,5 @@
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vite';
+import { defineConfig } from 'vitest/config';
 
 const repository = process.env.GITHUB_REPOSITORY?.split('/')[1];
 

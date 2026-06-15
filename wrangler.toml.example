@@ -1,0 +1,16 @@
+name = "wedding-photo-gallery-api"
+main = "worker/src/index.ts"
+compatibility_date = "2026-06-15"
+
+[vars]
+EVENT_TITLE = "Wedding Photo Gallery"
+ALLOWED_ORIGINS = "https://your-github-username.github.io"
+
+[[r2_buckets]]
+binding = "PHOTOS_BUCKET"
+bucket_name = "wedding-photo-gallery"
+
+[[d1_databases]]
+binding = "WEDDING_DB"
+database_name = "wedding-photo-gallery"
+database_id = "replace-with-your-d1-database-id"

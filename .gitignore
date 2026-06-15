@@ -6,4 +6,5 @@ dist/
 npm-debug.log*
 coverage/
 *.local
+*.tsbuildinfo
 wrangler.toml
