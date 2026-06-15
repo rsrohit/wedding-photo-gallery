@@ -35,5 +35,5 @@
 - [x] Add lightbox previous/next buttons and keyboard navigation.
 - [x] Run `npm test`.
 - [x] Run `npm run build`.
-- [ ] Apply D1 migration, deploy Worker, push GitHub Pages.
-- [ ] Verify live UI, metadata dialog, carousels, and view endpoint.
+- [x] Apply D1 migration, deploy Worker, push GitHub Pages.
+- [x] Verify live UI, metadata dialog, carousels, and view endpoint.
