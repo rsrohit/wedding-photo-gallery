@@ -34,6 +34,7 @@ import {
   getRecentlyUploadedPhotos
 } from './shared/photoCollections';
 import { buildPhotoDetailRows } from './shared/photoDetails';
+import { getRecentHeroTitle } from './shared/heroCopy';
 import {
   MAX_STORED_PHOTO_SIZE_BYTES,
   MAX_PHOTO_SIZE_BYTES,
@@ -627,7 +628,7 @@ function RecentHero({
           Recently uploaded
         </div>
         <h3 className="mt-3 text-3xl font-semibold leading-tight text-white sm:text-4xl">
-          {photo.uploaderName}
+          {getRecentHeroTitle(photo)}
         </h3>
         <div className="mt-5 grid gap-2 sm:grid-cols-2">
           <MiniStat label="Uploaded" value={formatDate(photo.createdAt)} />
