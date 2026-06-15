@@ -3,7 +3,13 @@ import {
   SUPPORTED_PHOTO_TYPES,
   validateUploaderName
 } from '../../src/shared/photoValidation';
-import { errorResponse, jsonResponse, parseEventPhotoPath, withCorsHeaders } from './http';
+import {
+  errorResponse,
+  jsonResponse,
+  parseEventPhotoPath,
+  parseEventPhotoViewPath,
+  withCorsHeaders
+} from './http';
 import {
   buildPhotoMetadata,
   createPhotoObjectKey,
@@ -35,6 +41,8 @@ type PhotoRow = {
   captured_at: string | null;
   latitude: number | null;
   longitude: number | null;
+  view_count: number;
+  last_viewed_at: string | null;
 };
 
 const DEFAULT_EVENT_TITLE = 'Wedding Photo Gallery';
@@ -76,6 +84,11 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
       return servePhotoFile(request, env, filePath.eventSlug, filePath.photoId, origin, allowedOrigins);
     }
 
+    const viewPath = parseEventPhotoViewPath(url.pathname);
+    if (viewPath && request.method === 'POST') {
+      return recordPhotoView(env, viewPath.eventSlug, viewPath.photoId, origin, allowedOrigins);
+    }
+
     const hideMatch = url.pathname.match(/^\/api\/admin\/events\/([^/]+)\/photos\/([^/]+)\/hide$/);
     if (hideMatch && request.method === 'POST') {
       return hidePhoto(request, env, decodeURIComponent(hideMatch[1]), decodeURIComponent(hideMatch[2]), origin, allowedOrigins);
@@ -108,7 +121,7 @@ async function listPhotos(
   const { results } = await env.WEDDING_DB.prepare(
     `SELECT id, event_slug, r2_key, original_name, stored_name, content_type, size_bytes,
             original_size_bytes, uploader_name, created_at, camera_make, camera_model,
-            captured_at, latitude, longitude
+            captured_at, latitude, longitude, view_count, last_viewed_at
      FROM photos
      WHERE event_slug = ? AND status = 'approved'
      ORDER BY created_at DESC`
@@ -239,7 +252,9 @@ async function uploadPhoto(
         camera_model: metadata.cameraModel || null,
         captured_at: metadata.capturedAt || null,
         latitude: metadata.latitude ?? null,
-        longitude: metadata.longitude ?? null
+        longitude: metadata.longitude ?? null,
+        view_count: 0,
+        last_viewed_at: null
       })
     },
     201,
@@ -259,7 +274,7 @@ async function servePhotoFile(
   const row = await env.WEDDING_DB.prepare(
     `SELECT id, event_slug, r2_key, original_name, stored_name, content_type, size_bytes,
             original_size_bytes, uploader_name, created_at, camera_make, camera_model,
-            captured_at, latitude, longitude
+            captured_at, latitude, longitude, view_count, last_viewed_at
      FROM photos
      WHERE event_slug = ? AND id = ? AND status = 'approved'`
   )
@@ -285,6 +300,51 @@ async function servePhotoFile(
   }
 
   return new Response(object.body, { headers });
+}
+
+async function recordPhotoView(
+  env: Env,
+  eventSlug: string,
+  photoId: string,
+  origin: string | null,
+  allowedOrigins: string[]
+): Promise<Response> {
+  const slugError = validateEventSlug(eventSlug);
+  if (slugError) {
+    return errorResponse(slugError, 400, origin, allowedOrigins);
+  }
+
+  const viewedAt = new Date().toISOString();
+  await env.WEDDING_DB.prepare(
+    `UPDATE photos
+     SET view_count = view_count + 1,
+         last_viewed_at = ?
+     WHERE event_slug = ? AND id = ? AND status = 'approved'`
+  )
+    .bind(viewedAt, eventSlug, photoId)
+    .run();
+
+  const row = await env.WEDDING_DB.prepare(
+    `SELECT view_count, last_viewed_at
+     FROM photos
+     WHERE event_slug = ? AND id = ? AND status = 'approved'`
+  )
+    .bind(eventSlug, photoId)
+    .first<{ view_count: number; last_viewed_at: string }>();
+
+  if (!row) {
+    return errorResponse('Photo not found.', 404, origin, allowedOrigins);
+  }
+
+  return jsonResponse(
+    {
+      viewCount: row.view_count,
+      lastViewedAt: row.last_viewed_at
+    },
+    200,
+    origin,
+    allowedOrigins
+  );
 }
 
 async function hidePhoto(
@@ -364,6 +424,8 @@ function toPhotoDto(request: Request, row: PhotoRow) {
     originalSizeBytes: row.original_size_bytes,
     contentType: row.content_type,
     createdAt: row.created_at,
+    viewCount: row.view_count || 0,
+    lastViewedAt: row.last_viewed_at,
     metadata: {
       ...(row.camera_make ? { cameraMake: row.camera_make } : {}),
       ...(row.camera_model ? { cameraModel: row.camera_model } : {}),

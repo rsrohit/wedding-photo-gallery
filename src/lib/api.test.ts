@@ -4,6 +4,7 @@ import {
   buildApiUrl,
   deletePhoto,
   hidePhoto,
+  recordPhotoView,
   uploadPhoto
 } from './api';
 
@@ -129,6 +130,32 @@ describe('API mutations', () => {
       expect.objectContaining({
         method: 'DELETE',
         headers: { 'x-admin-token': 'secret' }
+      })
+    );
+  });
+
+  it('records a photo view and returns the updated count', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ viewCount: 7, lastViewedAt: '2026-06-15T11:00:00.000Z' })
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      recordPhotoView({
+        apiBaseUrl: 'https://api.example',
+        eventSlug: 'wedding',
+        photoId: 'photo-1'
+      })
+    ).resolves.toEqual({
+      viewCount: 7,
+      lastViewedAt: '2026-06-15T11:00:00.000Z'
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.example/api/events/wedding/photos/photo-1/view',
+      expect.objectContaining({
+        method: 'POST'
       })
     );
   });

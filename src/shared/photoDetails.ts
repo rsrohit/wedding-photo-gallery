@@ -6,6 +6,8 @@ export type PhotoDetailSource = {
   sizeBytes: number;
   originalSizeBytes: number | null;
   contentType: string;
+  viewCount?: number;
+  lastViewedAt?: string | null;
   metadata: PhotoMetadata;
 };
 
@@ -19,6 +21,10 @@ export function buildPhotoDetailRows(photo: PhotoDetailSource): PhotoDetailRow[]
     { label: 'Camera', value: formatCamera(photo.metadata) },
     { label: 'Captured', value: formatCapturedAt(photo.metadata.capturedAt) },
     { label: 'Location', value: formatLocation(photo.metadata.latitude, photo.metadata.longitude) },
+    ...(typeof photo.viewCount === 'number'
+      ? [{ label: 'Views', value: formatViewCount(photo.viewCount) }]
+      : []),
+    ...(photo.lastViewedAt ? [{ label: 'Last viewed', value: formatCapturedAt(photo.lastViewedAt) }] : []),
     { label: 'Original file', value: photo.originalName },
     { label: 'Stored file', value: photo.storedName },
     ...(photo.originalSizeBytes
@@ -63,6 +69,10 @@ function formatLocation(latitude: number | undefined, longitude: number | undefi
   }
 
   return `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+}
+
+function formatViewCount(count: number): string {
+  return count === 1 ? '1 view' : `${count} views`;
 }
 
 function formatBytes(bytes: number): string {

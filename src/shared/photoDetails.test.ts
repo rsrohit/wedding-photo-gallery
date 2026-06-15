@@ -46,4 +46,22 @@ describe('buildPhotoDetailRows', () => {
       { label: 'Location', value: 'Not available' }
     ]);
   });
+
+  it('includes view metadata when available', () => {
+    expect(
+      buildPhotoDetailRows({
+        originalName: 'photo.jpg',
+        storedName: 'guest-20260615T110000000Z-photo-1.jpg',
+        sizeBytes: 1024,
+        originalSizeBytes: null,
+        contentType: 'image/jpeg',
+        viewCount: 2,
+        lastViewedAt: '2026-06-15T11:00:00',
+        metadata: {}
+      }).slice(3, 5)
+    ).toEqual([
+      { label: 'Views', value: '2 views' },
+      { label: 'Last viewed', value: 'Jun 15, 2026, 11:00 AM' }
+    ]);
+  });
 });

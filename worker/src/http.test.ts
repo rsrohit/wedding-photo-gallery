@@ -3,7 +3,8 @@ import {
   createCorsHeaders,
   errorResponse,
   jsonResponse,
-  parseEventPhotoPath
+  parseEventPhotoPath,
+  parseEventPhotoViewPath
 } from './http';
 
 describe('jsonResponse', () => {
@@ -52,5 +53,18 @@ describe('parseEventPhotoPath', () => {
 
   it('returns null for unrelated paths', () => {
     expect(parseEventPhotoPath('/api/events/wedding/photos')).toBeNull();
+  });
+});
+
+describe('parseEventPhotoViewPath', () => {
+  it('parses event photo view paths', () => {
+    expect(parseEventPhotoViewPath('/api/events/wedding/photos/photo-123/view')).toEqual({
+      eventSlug: 'wedding',
+      photoId: 'photo-123'
+    });
+  });
+
+  it('returns null for file paths', () => {
+    expect(parseEventPhotoViewPath('/api/events/wedding/photos/photo-123/file')).toBeNull();
   });
 });

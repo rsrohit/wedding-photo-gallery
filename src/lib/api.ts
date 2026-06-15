@@ -12,6 +12,8 @@ export type Photo = {
   originalSizeBytes: number | null;
   contentType: string;
   createdAt: string;
+  viewCount: number;
+  lastViewedAt: string | null;
   metadata: PhotoMetadata;
 };
 
@@ -23,6 +25,15 @@ type ApiOptions = {
 type PhotoMutationOptions = ApiOptions & {
   photoId: string;
   adminToken: string;
+};
+
+type PhotoViewOptions = ApiOptions & {
+  photoId: string;
+};
+
+export type PhotoViewResult = {
+  viewCount: number;
+  lastViewedAt: string;
 };
 
 export class ApiError extends Error {
@@ -134,4 +145,20 @@ export async function deletePhoto(options: PhotoMutationOptions): Promise<void> 
   );
 
   await parseResponse<{ ok: true }>(response);
+}
+
+export async function recordPhotoView(options: PhotoViewOptions): Promise<PhotoViewResult> {
+  const response = await fetch(
+    buildApiUrl(
+      options.apiBaseUrl,
+      `/api/events/${encodeURIComponent(options.eventSlug)}/photos/${encodeURIComponent(
+        options.photoId
+      )}/view`
+    ),
+    {
+      method: 'POST'
+    }
+  );
+
+  return parseResponse<PhotoViewResult>(response);
 }

@@ -1,12 +1,13 @@
 import {
   Camera,
+  ChevronLeft,
+  ChevronRight,
   Download,
   Eye,
   EyeOff,
   ImagePlus,
   Info,
   Loader2,
-  Orbit,
   RefreshCw,
   Shield,
   Sparkles,
@@ -14,7 +15,7 @@ import {
   Upload,
   X
 } from 'lucide-react';
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { appConfig } from './config';
 import {
   ApiError,
@@ -22,10 +23,16 @@ import {
   deletePhoto,
   fetchPhotos,
   hidePhoto,
+  recordPhotoView,
   uploadPhoto
 } from './lib/api';
 import { preparePhotoForUpload } from './lib/photoProcessing';
-import { GalleryView, GALLERY_VIEWS, getGalleryViewLabel } from './shared/galleryView';
+import {
+  AdjacentDirection,
+  getAdjacentPhoto,
+  getMostViewedPhotos,
+  getRecentlyUploadedPhotos
+} from './shared/photoCollections';
 import { buildPhotoDetailRows } from './shared/photoDetails';
 import {
   MAX_STORED_PHOTO_SIZE_BYTES,
@@ -49,7 +56,6 @@ export function App() {
   const [isLoading, setIsLoading] = useState(Boolean(apiBaseUrl));
   const [adminToken, setAdminToken] = useState('');
   const [isAdminOpen, setIsAdminOpen] = useState(false);
-  const [galleryView, setGalleryView] = useState<GalleryView>('grid');
   const [infoPhoto, setInfoPhoto] = useState<Photo | null>(null);
 
   const normalizedUploaderName = normalizeUploaderName(uploaderName);
@@ -62,7 +68,60 @@ export function App() {
     () => selectedFiles.reduce((total, file) => total + file.size, 0),
     [selectedFiles]
   );
-  const latestPhoto = photos[0];
+  const recentPhotos = useMemo(() => getRecentlyUploadedPhotos(photos), [photos]);
+  const mostViewedPhotos = useMemo(() => getMostViewedPhotos(photos), [photos]);
+  const latestPhoto = recentPhotos[0];
+  const canNavigateLightbox = recentPhotos.length > 1;
+
+  const recordView = useCallback(async (photo: Photo) => {
+    if (!apiBaseUrl) {
+      return;
+    }
+
+    try {
+      const viewResult = await recordPhotoView({
+        apiBaseUrl,
+        eventSlug,
+        photoId: photo.id
+      });
+      const applyViewUpdate = (currentPhoto: Photo) =>
+        currentPhoto.id === photo.id
+          ? {
+              ...currentPhoto,
+              viewCount: viewResult.viewCount,
+              lastViewedAt: viewResult.lastViewedAt
+            }
+          : currentPhoto;
+
+      setPhotos((current) => current.map(applyViewUpdate));
+      setSelectedPhoto((current) => (current ? applyViewUpdate(current) : current));
+      setInfoPhoto((current) => (current ? applyViewUpdate(current) : current));
+    } catch (error) {
+      console.warn('Unable to record photo view.', error);
+    }
+  }, []);
+
+  const openPhoto = useCallback(
+    (photo: Photo) => {
+      setSelectedPhoto(photo);
+      void recordView(photo);
+    },
+    [recordView]
+  );
+
+  const openAdjacentPhoto = useCallback(
+    (direction: AdjacentDirection) => {
+      if (!selectedPhoto) {
+        return;
+      }
+
+      const adjacentPhoto = getAdjacentPhoto(recentPhotos, selectedPhoto.id, direction);
+      if (adjacentPhoto) {
+        openPhoto(adjacentPhoto);
+      }
+    },
+    [openPhoto, recentPhotos, selectedPhoto]
+  );
 
   useEffect(() => {
     if (!apiBaseUrl) {
@@ -72,6 +131,32 @@ export function App() {
 
     void loadPhotos();
   }, []);
+
+  useEffect(() => {
+    if (!selectedPhoto) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setSelectedPhoto(null);
+        return;
+      }
+
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        openAdjacentPhoto('previous');
+      }
+
+      if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        openAdjacentPhoto('next');
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [openAdjacentPhoto, selectedPhoto]);
 
   async function loadPhotos() {
     setIsLoading(true);
@@ -158,6 +243,12 @@ export function App() {
     try {
       await hidePhoto({ apiBaseUrl, eventSlug, photoId: photo.id, adminToken });
       setPhotos((current) => current.filter((item) => item.id !== photo.id));
+      if (selectedPhoto?.id === photo.id) {
+        setSelectedPhoto(null);
+      }
+      if (infoPhoto?.id === photo.id) {
+        setInfoPhoto(null);
+      }
       setMessage('Photo hidden.');
     } catch (error) {
       setMessage(getErrorMessage(error));
@@ -334,26 +425,16 @@ export function App() {
         </aside>
 
         <section className="z-10 flex min-w-0 flex-col gap-4">
-          <div className="glass-panel flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="gallery-heading flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-teal-100/80">
-                <Orbit className="h-3.5 w-3.5" aria-hidden="true" />
+                <ImagePlus className="h-3.5 w-3.5" aria-hidden="true" />
                 Memory field
               </div>
               <h2 className="mt-2 text-2xl font-semibold tracking-normal text-white">Shared moments</h2>
             </div>
-
-            <div className="segmented-control" aria-label="Gallery view">
-              {GALLERY_VIEWS.map((view) => (
-                <button
-                  key={view}
-                  type="button"
-                  onClick={() => setGalleryView(view)}
-                  className={galleryView === view ? 'is-active' : ''}
-                >
-                  {getGalleryViewLabel(view)}
-                </button>
-              ))}
+            <div className="rounded-lg border border-white/10 bg-white/8 px-3 py-2 text-sm font-semibold text-white/72">
+              {photos.length} {photos.length === 1 ? 'photo' : 'photos'}
             </div>
           </div>
 
@@ -361,24 +442,20 @@ export function App() {
             <LoadingState />
           ) : photos.length === 0 ? (
             <EmptyState />
-          ) : galleryView === 'constellation' ? (
-            <ConstellationView
-              photos={photos}
+          ) : latestPhoto ? (
+            <CarouselShowcase
+              heroPhoto={latestPhoto}
+              recentPhotos={recentPhotos}
+              mostViewedPhotos={mostViewedPhotos}
+              allPhotos={recentPhotos}
               isAdminOpen={isAdminOpen}
-              onOpen={setSelectedPhoto}
+              onOpen={openPhoto}
               onShowInfo={setInfoPhoto}
               onHide={handleHide}
               onDelete={handleDelete}
             />
           ) : (
-            <GridView
-              photos={photos}
-              isAdminOpen={isAdminOpen}
-              onOpen={setSelectedPhoto}
-              onShowInfo={setInfoPhoto}
-              onHide={handleHide}
-              onDelete={handleDelete}
-            />
+            <EmptyState />
           )}
         </section>
       </section>
@@ -390,6 +467,20 @@ export function App() {
           aria-modal="true"
           onClick={() => setSelectedPhoto(null)}
         >
+          {canNavigateLightbox && (
+            <button
+              type="button"
+              className="lightbox-nav lightbox-nav-left"
+              onClick={(event) => {
+                event.stopPropagation();
+                openAdjacentPhoto('previous');
+              }}
+              aria-label="Previous photo"
+              title="Previous photo"
+            >
+              <ChevronLeft className="h-7 w-7" aria-hidden="true" />
+            </button>
+          )}
           <div className="lightbox-frame max-h-full w-full max-w-5xl" onClick={(event) => event.stopPropagation()}>
             <img
               src={selectedPhoto.imageUrl}
@@ -397,9 +488,12 @@ export function App() {
               className="max-h-[78vh] w-full rounded-lg object-contain"
             />
             <div className="mt-3 flex flex-col gap-3 text-sm text-white sm:flex-row sm:items-center sm:justify-between">
-              <span>
-                Uploaded by <strong>{selectedPhoto.uploaderName}</strong>
-              </span>
+              <div className="min-w-0">
+                <p>
+                  Uploaded by <strong>{selectedPhoto.uploaderName}</strong>
+                </p>
+                <p className="mt-1 text-xs text-white/52">{formatViews(selectedPhoto.viewCount)}</p>
+              </div>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -416,6 +510,20 @@ export function App() {
               </div>
             </div>
           </div>
+          {canNavigateLightbox && (
+            <button
+              type="button"
+              className="lightbox-nav lightbox-nav-right"
+              onClick={(event) => {
+                event.stopPropagation();
+                openAdjacentPhoto('next');
+              }}
+              aria-label="Next photo"
+              title="Next photo"
+            >
+              <ChevronRight className="h-7 w-7" aria-hidden="true" />
+            </button>
+          )}
         </div>
       )}
 
@@ -424,8 +532,7 @@ export function App() {
   );
 }
 
-type PhotoViewProps = {
-  photos: Photo[];
+type PhotoCollectionProps = {
   isAdminOpen: boolean;
   onOpen: (photo: Photo) => void;
   onShowInfo: (photo: Photo) => void;
@@ -433,83 +540,167 @@ type PhotoViewProps = {
   onDelete: (photo: Photo) => void;
 };
 
-function GridView({ photos, isAdminOpen, onOpen, onShowInfo, onHide, onDelete }: PhotoViewProps) {
+type CarouselShowcaseProps = PhotoCollectionProps & {
+  heroPhoto: Photo;
+  recentPhotos: Photo[];
+  mostViewedPhotos: Photo[];
+  allPhotos: Photo[];
+};
+
+function CarouselShowcase({
+  heroPhoto,
+  recentPhotos,
+  mostViewedPhotos,
+  allPhotos,
+  isAdminOpen,
+  onOpen,
+  onShowInfo,
+  onHide,
+  onDelete
+}: CarouselShowcaseProps) {
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
-      {photos.map((photo, index) => (
-        <PhotoCard
-          key={photo.id}
-          photo={photo}
-          index={index}
-          isAdminOpen={isAdminOpen}
-          onOpen={onOpen}
-          onShowInfo={onShowInfo}
-          onHide={onHide}
-          onDelete={onDelete}
+    <div className="carousel-showcase">
+      <RecentHero
+        photo={heroPhoto}
+        isAdminOpen={isAdminOpen}
+        onOpen={onOpen}
+        onShowInfo={onShowInfo}
+        onHide={onHide}
+        onDelete={onDelete}
+      />
+      <PhotoCarousel
+        title="Recently Uploaded"
+        photos={recentPhotos}
+        isAdminOpen={isAdminOpen}
+        onOpen={onOpen}
+        onShowInfo={onShowInfo}
+        onHide={onHide}
+        onDelete={onDelete}
+      />
+      <PhotoCarousel
+        title="Most Viewed"
+        photos={mostViewedPhotos}
+        isAdminOpen={isAdminOpen}
+        onOpen={onOpen}
+        onShowInfo={onShowInfo}
+        onHide={onHide}
+        onDelete={onDelete}
+      />
+      <PhotoCarousel
+        title="All Photos"
+        photos={allPhotos}
+        isAdminOpen={isAdminOpen}
+        onOpen={onOpen}
+        onShowInfo={onShowInfo}
+        onHide={onHide}
+        onDelete={onDelete}
+      />
+    </div>
+  );
+}
+
+function RecentHero({
+  photo,
+  isAdminOpen,
+  onOpen,
+  onShowInfo,
+  onHide,
+  onDelete
+}: PhotoCollectionProps & { photo: Photo }) {
+  return (
+    <section className="recent-hero">
+      <button
+        type="button"
+        className="recent-hero-image group"
+        onClick={() => onOpen(photo)}
+        aria-label={`Open ${photo.originalName}`}
+      >
+        <img
+          src={photo.imageUrl}
+          alt={`Uploaded by ${photo.uploaderName}`}
+          className="h-full w-full object-cover transition duration-700 group-hover:scale-105"
         />
-      ))}
-    </div>
-  );
-}
-
-function ConstellationView({ photos, isAdminOpen, onOpen, onHide, onDelete }: PhotoViewProps) {
-  const visiblePhotos = photos.slice(0, 18);
-
-  return (
-    <div className="constellation-map min-h-[620px] overflow-hidden rounded-lg border border-white/10 bg-black/22 p-4 sm:p-6">
-      <svg className="constellation-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-        {visiblePhotos.slice(1).map((photo, index) => {
-          const from = getConstellationPosition(index, visiblePhotos.length);
-          const to = getConstellationPosition(index + 1, visiblePhotos.length);
-          return (
-            <line
-              key={photo.id}
-              x1={from.x}
-              y1={from.y}
-              x2={to.x}
-              y2={to.y}
-              vectorEffect="non-scaling-stroke"
-            />
-          );
-        })}
-      </svg>
-
-      {visiblePhotos.map((photo, index) => {
-        const position = getConstellationPosition(index, visiblePhotos.length);
-        return (
-          <article
-            key={photo.id}
-            className="constellation-node"
-            style={{ left: `${position.x}%`, top: `${position.y}%` }}
-          >
-            <button type="button" onClick={() => onOpen(photo)} aria-label={`Open ${photo.originalName}`}>
-              <img src={photo.imageUrl} alt={`Uploaded by ${photo.uploaderName}`} loading="lazy" />
-            </button>
-            <div className="mt-2 max-w-28 text-center text-[11px] font-medium text-white/76">
-              {photo.uploaderName}
-            </div>
-            {isAdminOpen && (
-              <AdminActions
-                photo={photo}
-                compact
-                onHide={onHide}
-                onDelete={onDelete}
-              />
-            )}
-          </article>
-        );
-      })}
-
-      {photos.length > visiblePhotos.length && (
-        <div className="absolute bottom-4 left-4 rounded-md border border-white/12 bg-black/34 px-3 py-2 text-xs text-white/70">
-          Showing latest {visiblePhotos.length} of {photos.length}
+      </button>
+      <div className="recent-hero-content">
+        <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-amber-100/82">
+          <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+          Recently uploaded
         </div>
-      )}
-    </div>
+        <h3 className="mt-3 text-3xl font-semibold leading-tight text-white sm:text-4xl">
+          {photo.uploaderName}
+        </h3>
+        <div className="mt-5 grid gap-2 sm:grid-cols-2">
+          <MiniStat label="Uploaded" value={formatDate(photo.createdAt)} />
+          <MiniStat label="Views" value={formatViews(photo.viewCount)} />
+        </div>
+        <div className="mt-5 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onOpen(photo)}
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-white px-4 text-sm font-semibold text-black"
+          >
+            <Eye className="h-4 w-4" aria-hidden="true" />
+            View
+          </button>
+          <button
+            type="button"
+            onClick={() => onShowInfo(photo)}
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-white/16 bg-white/10 px-4 text-sm font-semibold text-white hover:bg-white/16"
+          >
+            <Info className="h-4 w-4" aria-hidden="true" />
+            Info
+          </button>
+          <a
+            href={photo.downloadUrl}
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-white/16 bg-white/10 px-4 text-sm font-semibold text-white hover:bg-white/16"
+          >
+            <Download className="h-4 w-4" aria-hidden="true" />
+            Download
+          </a>
+          {isAdminOpen && <AdminActions photo={photo} onHide={onHide} onDelete={onDelete} />}
+        </div>
+      </div>
+    </section>
   );
 }
 
-type PhotoCardProps = Omit<PhotoViewProps, 'photos'> & {
+function PhotoCarousel({
+  title,
+  photos,
+  isAdminOpen,
+  onOpen,
+  onShowInfo,
+  onHide,
+  onDelete
+}: PhotoCollectionProps & { title: string; photos: Photo[] }) {
+  return (
+    <section className="carousel-rail">
+      <div className="mb-3 flex items-center justify-between gap-3 px-1">
+        <h3 className="text-lg font-semibold text-white">{title}</h3>
+        <span className="rounded-md border border-white/10 bg-white/8 px-2 py-1 text-xs font-semibold text-white/56">
+          {photos.length}
+        </span>
+      </div>
+      <div className="carousel-track" aria-label={`${title} carousel`}>
+        {photos.map((photo, index) => (
+          <div className="carousel-item" key={`${title}-${photo.id}`}>
+            <PhotoCard
+              photo={photo}
+              index={index}
+              isAdminOpen={isAdminOpen}
+              onOpen={onOpen}
+              onShowInfo={onShowInfo}
+              onHide={onHide}
+              onDelete={onDelete}
+            />
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+type PhotoCardProps = PhotoCollectionProps & {
   photo: Photo;
   index: number;
 };
@@ -534,6 +725,10 @@ function PhotoCard({ photo, index, isAdminOpen, onOpen, onShowInfo, onHide, onDe
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-white">{photo.uploaderName}</p>
           <p className="text-xs text-white/48">{formatDate(photo.createdAt)}</p>
+          <p className="mt-1 inline-flex items-center gap-1 text-xs text-teal-100/70">
+            <Eye className="h-3 w-3" aria-hidden="true" />
+            {formatViews(photo.viewCount)}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -639,6 +834,15 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-black/24 px-3 py-3">
+      <div className="text-sm font-semibold text-white">{value}</div>
+      <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/42">{label}</div>
+    </div>
+  );
+}
+
 function LoadingState() {
   return (
     <div className="glass-panel flex min-h-96 items-center justify-center text-white/70">
@@ -660,18 +864,6 @@ function EmptyState() {
       </p>
     </div>
   );
-}
-
-function getConstellationPosition(index: number, total: number): { x: number; y: number } {
-  const angle = (index / Math.max(total, 1)) * Math.PI * 2 - Math.PI / 2;
-  const ring = index % 3;
-  const radiusX = 22 + ring * 9;
-  const radiusY = 20 + ring * 7;
-
-  return {
-    x: 50 + Math.cos(angle) * radiusX,
-    y: 50 + Math.sin(angle) * radiusY
-  };
 }
 
 function getErrorMessage(error: unknown): string {
@@ -701,6 +893,10 @@ function formatBytes(bytes: number): string {
   }
 
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+function formatViews(count: number): string {
+  return count === 1 ? '1 view' : `${count} views`;
 }
 
 function formatDate(value: string, compact = false): string {

@@ -67,3 +67,16 @@ export function parseEventPhotoPath(pathname: string): EventPhotoPath | null {
     photoId: decodeURIComponent(match[2])
   };
 }
+
+export function parseEventPhotoViewPath(pathname: string): EventPhotoPath | null {
+  const match = pathname.match(/^\/api\/events\/([^/]+)\/photos\/([^/]+)\/view$/);
+
+  if (!match) {
+    return null;
+  }
+
+  return {
+    eventSlug: decodeURIComponent(match[1]),
+    photoId: decodeURIComponent(match[2])
+  };
+}

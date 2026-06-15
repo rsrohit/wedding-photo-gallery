@@ -8,3 +8,4 @@ coverage/
 *.local
 *.tsbuildinfo
 wrangler.toml
+.superpowers/
